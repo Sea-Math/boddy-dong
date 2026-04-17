@@ -110,6 +110,7 @@ const BareMux = window.BareMux ?? { BareMuxConnection: class { setTransport() {}
 let sharedScramjet = null;
 let sharedConnection = null;
 let sharedConnectionReady = false;
+let useFallbackFrame = false;
 
 let tabs = [];
 let activeTabId = null;
@@ -202,32 +203,42 @@ async function initializeBrowser() {
     const root = document.getElementById("app");
     root.innerHTML = `
         <div class="browser-container">
-            <div class="flex tabs" id="tabs-container"></div>
+            <div class="header-row">
+                <div class="flex tabs" id="tabs-container"></div>
+            </div>
             <div class="flex nav">
                 <button id="back-btn" title="Back"><i class="fa-solid fa-chevron-left"></i></button>
                 <button id="fwd-btn" title="Forward"><i class="fa-solid fa-chevron-right"></i></button>
                 <button id="reload-btn" title="Reload"><i class="fa-solid fa-rotate-right"></i></button>
                 <div class="address-wrapper">
-                    <input class="bar" id="address-bar" autocomplete="off" placeholder="Search or enter URL">
+                    <i class="fa-solid fa-magnifying-glass address-icon"></i>
+                    <input class="bar" id="address-bar" autocomplete="off" placeholder="Search with Brave or enter URL">
                     <button id="home-btn-nav" title="Home"><i class="fa-solid fa-house"></i></button>
                 </div>
                 <button id="devtools-btn" title="DevTools"><i class="fa-solid fa-code"></i></button>
                 <button id="wisp-settings-btn" title="Proxy Settings"><i class="fa-solid fa-gear"></i></button>
             </div>
-            <div class="loading-bar-container"><div class="loading-bar" id="loading-bar"></div></div>
-            <div class="iframe-container" id="iframe-container">
-                <div id="loading" class="message-container" style="display: none;">
-                    <div class="message-content">
-                        <div class="spinner"></div>
-                        <h1 id="loading-title">Connecting</h1>
-                        <p id="loading-url">Initializing proxy...</p>
-                        <button id="skip-btn">Skip</button>
+            <div class="bookmark-bar" id="bookmark-bar">
+                <button class="bookmark-item" data-url="https://google.com"><i class="fa-brands fa-google"></i><span>Google</span></button>
+                <button class="bookmark-item" data-url="https://discord.com/app"><i class="fa-brands fa-discord"></i><span>Discord</span></button>
+                <button class="bookmark-item" data-url="https://github.com"><i class="fa-brands fa-github"></i><span>GitHub</span></button>
+            </div>
+            <div class="shell-panel">
+                <div class="loading-bar-container"><div class="loading-bar" id="loading-bar"></div></div>
+                <div class="iframe-container" id="iframe-container">
+                    <div id="loading" class="message-container" style="display: none;">
+                        <div class="message-content">
+                            <div class="spinner"></div>
+                            <h1 id="loading-title">Connecting</h1>
+                            <p id="loading-url">Initializing proxy...</p>
+                            <button id="skip-btn">Skip</button>
+                        </div>
                     </div>
-                </div>
-                <div id="error" class="message-container" style="display: none;">
-                    <div class="message-content">
-                        <h1>Connection Error</h1>
-                        <p id="error-message">An error occurred.</p>
+                    <div id="error" class="message-container" style="display: none;">
+                        <div class="message-content">
+                            <h1>Connection Error</h1>
+                            <p id="error-message">An error occurred.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -249,6 +260,10 @@ async function initializeBrowser() {
     document.getElementById('home-btn-nav').onclick = () => window.location.href = '../index.html';
     document.getElementById('devtools-btn').onclick = toggleDevTools;
     document.getElementById('wisp-settings-btn').onclick = openSettings;
+
+    document.querySelectorAll('#bookmark-bar .bookmark-item').forEach((item) => {
+        item.onclick = () => handleSubmit(item.dataset.url);
+    });
 
     // Skip button logic
     elements.skipBtn.onclick = () => {
@@ -275,8 +290,44 @@ async function initializeBrowser() {
 // =====================================================
 // TAB MANAGEMENT
 // =====================================================
+function createDirectFrameController() {
+    const iframe = document.createElement('iframe');
+    const listeners = { urlchange: [] };
+
+    return {
+        frame: iframe,
+        addEventListener(type, callback) {
+            if (type === 'urlchange' && typeof callback === 'function') {
+                listeners.urlchange.push(callback);
+            }
+        },
+        go(url) {
+            iframe.src = url;
+            listeners.urlchange.forEach((cb) => cb({ url }));
+        },
+        back() {
+            try { iframe.contentWindow.history.back(); } catch { }
+        },
+        forward() {
+            try { iframe.contentWindow.history.forward(); } catch { }
+        },
+        reload() {
+            try { iframe.contentWindow.location.reload(); }
+            catch { iframe.src = iframe.src; }
+        }
+    };
+}
+
+function createBrowserFrame() {
+    if (!useFallbackFrame && sharedScramjet && typeof sharedScramjet.createFrame === 'function') {
+        return sharedScramjet.createFrame();
+    }
+
+    return createDirectFrameController();
+}
+
 function createTab(makeActive = true) {
-    const frame = sharedScramjet.createFrame();
+    const frame = createBrowserFrame();
     const tab = {
         id: nextTabId++,
         title: "New Tab",
@@ -670,22 +721,36 @@ async function checkHashParameters() {
 // =====================================================
 document.addEventListener('DOMContentLoaded', async function () {
     try {
-        // Proactively find the best server before initializing
+        // Render UI first so deployments never appear blank.
+        await initializeBrowser();
+    } catch (uiErr) {
+        console.error('UI initialization error:', uiErr);
+    }
+
+    try {
         await initializeWithBestServer();
-        
+    } catch (serverErr) {
+        console.warn('Server precheck failed:', serverErr);
+    }
+
+    try {
         await getSharedScramjet();
         await getSharedConnection();
+        useFallbackFrame = false;
+    } catch (proxyErr) {
+        useFallbackFrame = true;
+        console.warn('Proxy init failed, using direct iframe fallback:', proxyErr);
+    }
 
-        if ('serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator) {
+        try {
             const reg = await navigator.serviceWorker.register(getBasePath() + 'sw.js', { scope: getBasePath() });
-            
-            // Wait for SW to be ready
             await navigator.serviceWorker.ready;
-            
+
             const wispUrl = localStorage.getItem("proxServer") ?? DEFAULT_WISP;
             const allServers = getAllWispServers();
             const autoswitch = localStorage.getItem('wispAutoswitch') !== 'false';
-            
+
             const swConfig = {
                 type: "config",
                 wispurl: wispUrl,
@@ -693,8 +758,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 autoswitch: autoswitch
             };
 
-            // Send config to SW
-            const sendConfig = async () => {
+            const sendConfig = () => {
                 const sw = reg.active || navigator.serviceWorker.controller;
                 if (sw) {
                     console.log("Sending config to SW:", swConfig);
@@ -702,7 +766,6 @@ document.addEventListener('DOMContentLoaded', async function () {
                 }
             };
 
-            // Try sending immediately, then retry if needed
             sendConfig();
             setTimeout(sendConfig, 500);
             setTimeout(sendConfig, 1500);
@@ -720,10 +783,8 @@ document.addEventListener('DOMContentLoaded', async function () {
             });
 
             reg.update();
+        } catch (swErr) {
+            console.warn('Service worker setup failed (non-fatal):', swErr);
         }
-
-        await initializeBrowser();
-    } catch (err) {
-        console.error("Initialization error:", err);
     }
 });
