@@ -721,21 +721,30 @@ async function checkHashParameters() {
 // =====================================================
 document.addEventListener('DOMContentLoaded', async function () {
     try {
-        // Proactively find the best server before initializing
+        // Render UI first so deployments never appear blank.
+        await initializeBrowser();
+    } catch (uiErr) {
+        console.error('UI initialization error:', uiErr);
+    }
+
+    try {
         await initializeWithBestServer();
+    } catch (serverErr) {
+        console.warn('Server precheck failed:', serverErr);
+    }
 
+    try {
+        await getSharedScramjet();
+        await getSharedConnection();
+        useFallbackFrame = false;
+    } catch (proxyErr) {
+        useFallbackFrame = true;
+        console.warn('Proxy init failed, using direct iframe fallback:', proxyErr);
+    }
+
+    if ('serviceWorker' in navigator) {
         try {
-            await getSharedScramjet();
-            await getSharedConnection();
-        } catch (proxyErr) {
-            useFallbackFrame = true;
-            console.warn('Proxy init failed, using direct iframe fallback:', proxyErr);
-        }
-
-        if ('serviceWorker' in navigator) {
             const reg = await navigator.serviceWorker.register(getBasePath() + 'sw.js', { scope: getBasePath() });
-
-            // Wait for SW to be ready
             await navigator.serviceWorker.ready;
 
             const wispUrl = localStorage.getItem("proxServer") ?? DEFAULT_WISP;
@@ -749,8 +758,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 autoswitch: autoswitch
             };
 
-            // Send config to SW
-            const sendConfig = async () => {
+            const sendConfig = () => {
                 const sw = reg.active || navigator.serviceWorker.controller;
                 if (sw) {
                     console.log("Sending config to SW:", swConfig);
@@ -758,7 +766,6 @@ document.addEventListener('DOMContentLoaded', async function () {
                 }
             };
 
-            // Try sending immediately, then retry if needed
             sendConfig();
             setTimeout(sendConfig, 500);
             setTimeout(sendConfig, 1500);
@@ -776,14 +783,8 @@ document.addEventListener('DOMContentLoaded', async function () {
             });
 
             reg.update();
-        }
-
-        await initializeBrowser();
-    } catch (err) {
-        console.error("Initialization error:", err);
-        const root = document.getElementById('app');
-        if (root) {
-            root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#e2e8f0;font-family:Inter,sans-serif;">Failed to start browser UI.</div>';
+        } catch (swErr) {
+            console.warn('Service worker setup failed (non-fatal):', swErr);
         }
     }
 });
