@@ -202,32 +202,42 @@ async function initializeBrowser() {
     const root = document.getElementById("app");
     root.innerHTML = `
         <div class="browser-container">
-            <div class="flex tabs" id="tabs-container"></div>
+            <div class="header-row">
+                <div class="flex tabs" id="tabs-container"></div>
+            </div>
             <div class="flex nav">
                 <button id="back-btn" title="Back"><i class="fa-solid fa-chevron-left"></i></button>
                 <button id="fwd-btn" title="Forward"><i class="fa-solid fa-chevron-right"></i></button>
                 <button id="reload-btn" title="Reload"><i class="fa-solid fa-rotate-right"></i></button>
                 <div class="address-wrapper">
-                    <input class="bar" id="address-bar" autocomplete="off" placeholder="Search or enter URL">
+                    <i class="fa-solid fa-magnifying-glass address-icon"></i>
+                    <input class="bar" id="address-bar" autocomplete="off" placeholder="Search with Brave or enter URL">
                     <button id="home-btn-nav" title="Home"><i class="fa-solid fa-house"></i></button>
                 </div>
                 <button id="devtools-btn" title="DevTools"><i class="fa-solid fa-code"></i></button>
                 <button id="wisp-settings-btn" title="Proxy Settings"><i class="fa-solid fa-gear"></i></button>
             </div>
-            <div class="loading-bar-container"><div class="loading-bar" id="loading-bar"></div></div>
-            <div class="iframe-container" id="iframe-container">
-                <div id="loading" class="message-container" style="display: none;">
-                    <div class="message-content">
-                        <div class="spinner"></div>
-                        <h1 id="loading-title">Connecting</h1>
-                        <p id="loading-url">Initializing proxy...</p>
-                        <button id="skip-btn">Skip</button>
+            <div class="bookmark-bar" id="bookmark-bar">
+                <button class="bookmark-item" data-url="https://google.com"><i class="fa-brands fa-google"></i><span>Google</span></button>
+                <button class="bookmark-item" data-url="https://discord.com/app"><i class="fa-brands fa-discord"></i><span>Discord</span></button>
+                <button class="bookmark-item" data-url="https://github.com"><i class="fa-brands fa-github"></i><span>GitHub</span></button>
+            </div>
+            <div class="shell-panel">
+                <div class="loading-bar-container"><div class="loading-bar" id="loading-bar"></div></div>
+                <div class="iframe-container" id="iframe-container">
+                    <div id="loading" class="message-container" style="display: none;">
+                        <div class="message-content">
+                            <div class="spinner"></div>
+                            <h1 id="loading-title">Connecting</h1>
+                            <p id="loading-url">Initializing proxy...</p>
+                            <button id="skip-btn">Skip</button>
+                        </div>
                     </div>
-                </div>
-                <div id="error" class="message-container" style="display: none;">
-                    <div class="message-content">
-                        <h1>Connection Error</h1>
-                        <p id="error-message">An error occurred.</p>
+                    <div id="error" class="message-container" style="display: none;">
+                        <div class="message-content">
+                            <h1>Connection Error</h1>
+                            <p id="error-message">An error occurred.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -249,6 +259,10 @@ async function initializeBrowser() {
     document.getElementById('home-btn-nav').onclick = () => window.location.href = '../index.html';
     document.getElementById('devtools-btn').onclick = toggleDevTools;
     document.getElementById('wisp-settings-btn').onclick = openSettings;
+
+    document.querySelectorAll('#bookmark-bar .bookmark-item').forEach((item) => {
+        item.onclick = () => handleSubmit(item.dataset.url);
+    });
 
     // Skip button logic
     elements.skipBtn.onclick = () => {
