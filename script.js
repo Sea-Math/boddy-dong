@@ -110,6 +110,7 @@ const BareMux = window.BareMux ?? { BareMuxConnection: class { setTransport() {}
 let sharedScramjet = null;
 let sharedConnection = null;
 let sharedConnectionReady = false;
+let useFallbackFrame = false;
 
 let tabs = [];
 let activeTabId = null;
@@ -289,8 +290,44 @@ async function initializeBrowser() {
 // =====================================================
 // TAB MANAGEMENT
 // =====================================================
+function createDirectFrameController() {
+    const iframe = document.createElement('iframe');
+    const listeners = { urlchange: [] };
+
+    return {
+        frame: iframe,
+        addEventListener(type, callback) {
+            if (type === 'urlchange' && typeof callback === 'function') {
+                listeners.urlchange.push(callback);
+            }
+        },
+        go(url) {
+            iframe.src = url;
+            listeners.urlchange.forEach((cb) => cb({ url }));
+        },
+        back() {
+            try { iframe.contentWindow.history.back(); } catch { }
+        },
+        forward() {
+            try { iframe.contentWindow.history.forward(); } catch { }
+        },
+        reload() {
+            try { iframe.contentWindow.location.reload(); }
+            catch { iframe.src = iframe.src; }
+        }
+    };
+}
+
+function createBrowserFrame() {
+    if (!useFallbackFrame && sharedScramjet && typeof sharedScramjet.createFrame === 'function') {
+        return sharedScramjet.createFrame();
+    }
+
+    return createDirectFrameController();
+}
+
 function createTab(makeActive = true) {
-    const frame = sharedScramjet.createFrame();
+    const frame = createBrowserFrame();
     const tab = {
         id: nextTabId++,
         title: "New Tab",
@@ -686,20 +723,25 @@ document.addEventListener('DOMContentLoaded', async function () {
     try {
         // Proactively find the best server before initializing
         await initializeWithBestServer();
-        
-        await getSharedScramjet();
-        await getSharedConnection();
+
+        try {
+            await getSharedScramjet();
+            await getSharedConnection();
+        } catch (proxyErr) {
+            useFallbackFrame = true;
+            console.warn('Proxy init failed, using direct iframe fallback:', proxyErr);
+        }
 
         if ('serviceWorker' in navigator) {
             const reg = await navigator.serviceWorker.register(getBasePath() + 'sw.js', { scope: getBasePath() });
-            
+
             // Wait for SW to be ready
             await navigator.serviceWorker.ready;
-            
+
             const wispUrl = localStorage.getItem("proxServer") ?? DEFAULT_WISP;
             const allServers = getAllWispServers();
             const autoswitch = localStorage.getItem('wispAutoswitch') !== 'false';
-            
+
             const swConfig = {
                 type: "config",
                 wispurl: wispUrl,
@@ -739,5 +781,9 @@ document.addEventListener('DOMContentLoaded', async function () {
         await initializeBrowser();
     } catch (err) {
         console.error("Initialization error:", err);
+        const root = document.getElementById('app');
+        if (root) {
+            root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#e2e8f0;font-family:Inter,sans-serif;">Failed to start browser UI.</div>';
+        }
     }
 });
